@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-
+#![allow(clippy::too_many_arguments)]
 mod alert_connector;
 mod command_handler;
 mod db_manager;

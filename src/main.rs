@@ -10,16 +10,19 @@ mod war_message;
 mod weapon;
 
 use crate::alert_connector::AlertConnector;
-use crate::command_handler::{handle_register_command, handle_war_command};
+use crate::command_handler::{
+    handle_register_command, handle_war_command, handle_war_stat_command,
+};
 use crate::db_manager::DBManager;
 use crate::util::REACTIONS;
 use crate::war_message::WarMessage;
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
+use serenity::builder::CreateEmbed;
 use serenity::client::{Context, EventHandler};
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::channel::Reaction;
-use serenity::model::id::{ChannelId, MessageId};
+use serenity::model::prelude::interaction::application_command::ApplicationCommandInteraction;
 use serenity::model::prelude::ReactionType;
 use serenity::prelude::{GatewayIntents, TypeMapKey};
 use serenity::{async_trait, Client};
@@ -171,41 +174,65 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn reaction_remove_all(
-        &self,
-        _ctx: Context,
-        _channel_id: ChannelId,
-        _removed_from_message_id: MessageId,
-    ) {
-    }
-
     async fn interaction_create(&self, mut ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             if let Err(why) = command
                 .create_interaction_response(&ctx, |r| {
                     r.kind(InteractionResponseType::DeferredChannelMessageWithSource)
-                        .interaction_response_data(|f| f.ephemeral(true))
+                        .interaction_response_data(|f| f.ephemeral(command.guild_id.is_some()))
                 })
                 .await
             {
                 println!("Failed to defer command: {why}");
             }
-            let msg = match command.data.name.as_str() {
-                "war" => handle_war_command(&mut ctx, &command)
-                    .await
-                    .map(|s| s.to_string()),
-                "register" => handle_register_command(&mut ctx, &command).await,
-                _ => None,
-            };
-            if let Some(msg) = msg {
-                if let Err(why) = command
-                    .edit_original_interaction_response(&ctx.http, |response| response.content(msg))
-                    .await
-                {
-                    println!("Failed to respond to command: {}", why);
+            match command.data.name.as_str() {
+                "war" => {
+                    if let Some(msg) = handle_war_command(&mut ctx, &command).await {
+                        edit_response_content(&ctx, msg, &command).await;
+                    }
                 }
+                "register" => {
+                    if let Some(msg) = handle_register_command(&mut ctx, &command).await {
+                        edit_response_content(&ctx, msg, &command).await;
+                    }
+                }
+                "warstats" => {
+                    let result = handle_war_stat_command(&mut ctx, &command).await;
+                    if let Ok(embed) = result {
+                        edit_response_embed(&ctx, embed, &command).await;
+                    } else if let Err(why) = result {
+                        edit_response_content(&ctx, why, &command).await;
+                    }
+                }
+                _ => {}
             }
         }
+    }
+}
+
+async fn edit_response_content(
+    ctx: &Context,
+    msg: impl ToString,
+    command: &ApplicationCommandInteraction,
+) {
+    if let Err(why) = command
+        .edit_original_interaction_response(&ctx.http, |response| response.content(msg))
+        .await
+    {
+        println!("Failed to respond to command: {}", why);
+    }
+}
+
+async fn edit_response_embed(
+    ctx: &Context,
+    embed: CreateEmbed,
+    command: &ApplicationCommandInteraction,
+) {
+    if let Err(why) = command
+        .edit_original_interaction_response(&ctx.http, |response| response.add_embed(embed))
+        .await
+    {
+        println!("Failed to respond to command: {}", why);
     }
 }
 

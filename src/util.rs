@@ -188,22 +188,22 @@ pub async fn fill_embed(embed: &mut CreateEmbed, ac: &AlertConnector, db_client:
 async fn fill_string_from_list(string: &mut String, list: &[u64], db_client: &mongodb::Client) {
     for &id in list {
         if let Some(user_data) = db_client.get_user_data(id).await {
-            if user_data.get_username().is_empty() {
+            if user_data.username.is_empty() {
                 continue;
             }
             *string = format!(
                 "{}`{:0>3}`{}`{} {},{} {}`\n",
                 string,
-                user_data.get_gear_score(),
-                user_data.get_username(),
+                user_data.gear_score,
+                user_data.username,
                 user_data.get_main_hand_level(),
-                if let Some(weapon) = user_data.get_main_hand() {
+                if let Some(weapon) = user_data.main_hand.as_ref() {
                     weapon.get_abbreviation()
                 } else {
                     "N/A"
                 },
                 user_data.get_secondary_level(),
-                if let Some(weapon) = user_data.get_secondary() {
+                if let Some(weapon) = user_data.secondary.as_ref() {
                     weapon.get_abbreviation()
                 } else {
                     "N/A"
@@ -220,14 +220,12 @@ async fn fill_secondary_string_from_list(
 ) {
     for &id in list {
         if let Some(user_data) = db_client.get_user_data(id).await {
-            if user_data.get_username().is_empty() {
+            if user_data.username.is_empty() {
                 continue;
             }
             *string = format!(
                 "{}`{:0>3}`{}\n",
-                string,
-                user_data.get_gear_score(),
-                user_data.get_username(),
+                string, user_data.gear_score, user_data.username,
             );
         }
     }

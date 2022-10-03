@@ -15,7 +15,9 @@ pub const WEAPONS: [Weapon; 12] = [
     Weapon::VoidGauntlet,
 ];
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Default, Hash, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Default, Hash, Serialize, Deserialize, Debug,
+)]
 #[serde(try_from = "String", into = "String")]
 pub enum Weapon {
     #[default]

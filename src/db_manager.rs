@@ -1,13 +1,14 @@
 use crate::trade_skill::TradeSkill;
 use crate::user_data::UserData;
 use crate::war_message::WarMessage;
-use crate::weapon::Weapon;
+use crate::weapon::{Weapon, WEAPONS};
 use crate::{async_trait, AlertConnector};
 use futures::TryStreamExt;
 use mongodb::bson;
 use mongodb::bson::{doc, Document};
 use mongodb::options::UpdateOptions;
 use serenity::model::id::RoleId;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[async_trait]
@@ -76,6 +77,7 @@ pub trait DBManager {
     async fn remove_artillery(&self, uuid: Uuid, user_id: u64);
     async fn remove_tentative(&self, uuid: Uuid, user_id: u64);
     async fn remove_not_available(&self, uuid: Uuid, user_id: u64);
+    async fn get_user_data_stats(&self) -> (u32, u32, HashMap<Weapon, u32>, HashMap<Weapon, u32>);
 }
 
 #[async_trait]
@@ -208,8 +210,8 @@ impl DBManager for mongodb::Client {
     ) {
         if self.get_alert_connector(uuid).await.is_some() {
             self.database("warhelperDB").collection::<AlertConnector>("AlertConnectors")
-                .update_one(doc!{ "code": uuid.to_string() }
-                            , doc!{
+                .update_one(doc! { "code": uuid.to_string() }
+                            , doc! {
                         "$addToSet": {
                             "warMessages":
                             bson::to_bson(&WarMessage::new(guild_id, channel_id, message_id)).unwrap()
@@ -752,5 +754,59 @@ impl DBManager for mongodb::Client {
             )
             .await
             .expect("Failed to update not available list in alert connector");
+    }
+
+    async fn get_user_data_stats(&self) -> (u32, u32, HashMap<Weapon, u32>, HashMap<Weapon, u32>) {
+        let mut user_data = self
+            .database("warhelperDB")
+            .collection::<Document>("UserData")
+            .find(None, None)
+            .await
+            .expect("Failed to get user data collection");
+        let mut total_level = 0;
+        let mut level_count = 0;
+        let mut total_gear_score = 0;
+        let mut gear_score_count = 0;
+        let mut main_hand_count = HashMap::new();
+        let mut secondary_count = HashMap::new();
+        for weapon in WEAPONS {
+            main_hand_count.insert(weapon, 0);
+            secondary_count.insert(weapon, 0);
+        }
+        while let Some(data) = user_data
+            .try_next()
+            .await
+            .expect("Failed to get next document")
+        {
+            let inner = data.values().nth(1).unwrap();
+            if let Ok(user_data) = bson::from_bson::<UserData>(inner.clone()) {
+                if user_data.level > 1 {
+                    total_level += user_data.level as u32;
+                    level_count += 1;
+                }
+                if user_data.gear_score > 0 {
+                    total_gear_score += user_data.gear_score as u32;
+                    gear_score_count += 1;
+                }
+                if let Some(weapon) = user_data.main_hand {
+                    *main_hand_count.entry(weapon).or_insert(0) += 1;
+                }
+                if let Some(weapon) = user_data.secondary {
+                    *secondary_count.entry(weapon).or_insert(0) += 1;
+                }
+            }
+        }
+        if gear_score_count == 0 {
+            gear_score_count = 1;
+        }
+        if level_count == 0 {
+            level_count = 1;
+        }
+        (
+            total_level / level_count,
+            total_gear_score / gear_score_count,
+            main_hand_count,
+            secondary_count,
+        )
     }
 }

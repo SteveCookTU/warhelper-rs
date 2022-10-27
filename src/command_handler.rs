@@ -438,7 +438,142 @@ pub async fn handle_war_stat_command(
                 Err("Invalid command option")
             }
         } else if sub_command.kind == CommandOptionType::SubCommandGroup {
-            Err("")
+            if sub_command.name.as_str() == "search" {
+                if let Some(guild_id) = command.guild_id {
+                    let option = &sub_command.options[0];
+                    if option.kind == CommandOptionType::SubCommand {
+                        match option.name.as_str() {
+                            "tradeskill" => {
+                                let trade_skill_str =
+                                    option.options.get(0).unwrap().resolved.as_ref().unwrap();
+                                if let CommandDataOptionValue::String(trade_skill_str) =
+                                    trade_skill_str
+                                {
+                                    if let Ok(trade_skill) =
+                                        TradeSkill::try_from(trade_skill_str.to_string())
+                                    {
+                                        let level = if let Some(level_data) = option.options.get(1)
+                                        {
+                                            if let CommandDataOptionValue::Integer(level) =
+                                                level_data.resolved.as_ref().unwrap()
+                                            {
+                                                *level as u8
+                                            } else {
+                                                200
+                                            }
+                                        } else {
+                                            200
+                                        };
+                                        let db_client = ctx
+                                            .data
+                                            .read()
+                                            .await
+                                            .get::<DBHandler>()
+                                            .expect("Failed to get DB Client")
+                                            .clone();
+                                        Ok(search_trade_skills(
+                                            ctx,
+                                            guild_id,
+                                            trade_skill,
+                                            level,
+                                            &db_client,
+                                        )
+                                        .await)
+                                    } else {
+                                        Err("Invalid TradeSkill")
+                                    }
+                                } else {
+                                    Err("No TradeSkill Provided")
+                                }
+                            }
+                            "weapon" => {
+                                let weapon_str =
+                                    option.options.get(0).unwrap().resolved.as_ref().unwrap();
+                                if let CommandDataOptionValue::String(weapon_str) = weapon_str {
+                                    if let Ok(weapon) = Weapon::try_from(weapon_str.to_string()) {
+                                        let level = if let Some(level_data) = option.options.get(1)
+                                        {
+                                            if let CommandDataOptionValue::Integer(level) =
+                                                level_data.resolved.as_ref().unwrap()
+                                            {
+                                                *level as u8
+                                            } else {
+                                                20
+                                            }
+                                        } else {
+                                            20
+                                        };
+                                        let db_client = ctx
+                                            .data
+                                            .read()
+                                            .await
+                                            .get::<DBHandler>()
+                                            .expect("Failed to get DB Client")
+                                            .clone();
+                                        Ok(search_weapon_levels(
+                                            ctx, guild_id, weapon, level, &db_client,
+                                        )
+                                        .await)
+                                    } else {
+                                        Err("Invalid Weapon")
+                                    }
+                                } else {
+                                    Err("No Weapon Provided")
+                                }
+                            }
+                            "gearscore" => {
+                                let gs = if let Some(gs) = option.options.get(0) {
+                                    if let CommandDataOptionValue::Integer(gs) =
+                                        gs.resolved.as_ref().unwrap()
+                                    {
+                                        *gs as u16
+                                    } else {
+                                        625
+                                    }
+                                } else {
+                                    625
+                                };
+                                let db_client = ctx
+                                    .data
+                                    .read()
+                                    .await
+                                    .get::<DBHandler>()
+                                    .expect("Failed to get DB Client")
+                                    .clone();
+                                Ok(search_gear_score(ctx, guild_id, gs, &db_client).await)
+                            }
+                            "level" => {
+                                let level = if let Some(level) = option.options.get(0) {
+                                    if let CommandDataOptionValue::Integer(level) =
+                                        level.resolved.as_ref().unwrap()
+                                    {
+                                        *level as u8
+                                    } else {
+                                        60
+                                    }
+                                } else {
+                                    60
+                                };
+                                let db_client = ctx
+                                    .data
+                                    .read()
+                                    .await
+                                    .get::<DBHandler>()
+                                    .expect("Failed to get DB Client")
+                                    .clone();
+                                Ok(search_level(ctx, guild_id, level, &db_client).await)
+                            }
+                            _ => Err("This command is currently under maintenance."),
+                        }
+                    } else {
+                        Err("Invalid subcommand option")
+                    }
+                } else {
+                    Err("This command can only be used within guilds")
+                }
+            } else {
+                Err("Invalid subcommand")
+            }
         } else {
             Err("Invalid option type")
         }
@@ -675,6 +810,160 @@ async fn generate_stats_embed(
             ),
             false,
         );
+
+    embed
+}
+
+async fn search_trade_skills(
+    ctx: &Context,
+    guild_id: GuildId,
+    trade_skill: TradeSkill,
+    level: u8,
+    db_client: &mongodb::Client,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::default();
+    embed.title(format!("War Helper Search - {}", trade_skill.get_label()));
+    embed.description(format!("Minimum Level: {}", level));
+
+    let mut names = String::new();
+
+    let mut count = 100;
+
+    for member in guild_id.members(ctx, None, None).await.unwrap() {
+        if !member.user.bot {
+            if let Some(user_data) = db_client.get_user_data(member.user.id.0).await {
+                if let Some(&user_level) = user_data.trade_skills.get(&trade_skill) {
+                    if user_level >= level {
+                        names = format!("{}`{}`\n", names, member.display_name());
+                        count -= 1;
+                    }
+                    if count == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if names.is_empty() {
+        names = "No Results".to_string();
+    }
+
+    embed.field("\u{200B}", names, false);
+
+    embed
+}
+
+async fn search_weapon_levels(
+    ctx: &Context,
+    guild_id: GuildId,
+    weapon: Weapon,
+    level: u8,
+    db_client: &mongodb::Client,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::default();
+    embed.title(format!("War Helper Search - {}", weapon.get_label()));
+    embed.description(format!("Minimum Level: {}", level));
+
+    let mut names = String::new();
+
+    let mut count = 100;
+
+    for member in guild_id.members(ctx, None, None).await.unwrap() {
+        if !member.user.bot {
+            if let Some(user_data) = db_client.get_user_data(member.user.id.0).await {
+                if let Some(&user_level) = user_data.weapons.get(&weapon) {
+                    if user_level >= level {
+                        names = format!("{}`{}`\n", names, member.display_name());
+                        count -= 1;
+                    }
+                    if count == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if names.is_empty() {
+        names = "No Results".to_string();
+    }
+
+    embed.field("\u{200B}", names, false);
+
+    embed
+}
+
+async fn search_gear_score(
+    ctx: &Context,
+    guild_id: GuildId,
+    gs: u16,
+    db_client: &mongodb::Client,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::default();
+    embed.title("War Helper Search - Gear Score");
+    embed.description(format!("Minimum GS: {}", gs));
+
+    let mut names = String::new();
+
+    let mut count = 100;
+
+    for member in guild_id.members(ctx, None, None).await.unwrap() {
+        if !member.user.bot {
+            if let Some(user_data) = db_client.get_user_data(member.user.id.0).await {
+                if user_data.gear_score >= gs {
+                    names = format!("{}`{}`\n", names, member.display_name());
+                    count -= 1;
+                    if count == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if names.is_empty() {
+        names = "No Results".to_string();
+    }
+
+    embed.field("\u{200B}", names, false);
+
+    embed
+}
+
+async fn search_level(
+    ctx: &Context,
+    guild_id: GuildId,
+    level: u8,
+    db_client: &mongodb::Client,
+) -> CreateEmbed {
+    let mut embed = CreateEmbed::default();
+    embed.title("War Helper Search - Level");
+    embed.description(format!("Minimum Level: {}", level));
+
+    let mut names = String::new();
+
+    let mut count = 100;
+
+    for member in guild_id.members(ctx, None, None).await.unwrap() {
+        if !member.user.bot {
+            if let Some(user_data) = db_client.get_user_data(member.user.id.0).await {
+                if user_data.level >= level {
+                    names = format!("{}`{}`\n", names, member.display_name());
+                    count -= 1;
+                    if count == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if names.is_empty() {
+        names = "No Results".to_string();
+    }
+
+    embed.field("\u{200B}", names, false);
 
     embed
 }
